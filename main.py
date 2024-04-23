@@ -1,10 +1,11 @@
 import telebot
 import sqlite3 as sql
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import requests
 import os
 from dotenv import load_dotenv
+import pandas as pd
 
 load_dotenv()
 
@@ -78,10 +79,10 @@ def add_meal(message: telebot.types.Message):
             message.chat.id,
             "❌ Неверный формат. Используй: /add_meal {блюдо} {граммы}.",
         )
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException:
         bot.send_message(
             message.chat.id,
-            f"❌ Что-то пошло не так! Возможно, вы ввели еду не на английском.\n\n`{e}`",
+            "❌ Что-то пошло не так! Возможно, вы ввели еду не на английском, либо такой еды нет.",
             parse_mode="Markdown",
         )
     except (KeyError, IndexError):
@@ -89,26 +90,97 @@ def add_meal(message: telebot.types.Message):
 
 
 @bot.message_handler(commands=["view_meals"])
-def view_meals(message):
-    con = sql.connect("meals.db")
-    c = con.cursor()
-    c.execute("SELECT * FROM meals")
-    meals = c.fetchall()
-    con.commit()
-    con.close()
-    if meals:
-        meal_list = "\n".join(
-            [
-                f"{time} - {meal} ({amount}g) - {calories:.2f} cal"
-                for time, meal, amount, calories in meals
-            ]
+def view_meals(message: telebot.types.Message):
+    if len(message.text.split()) == 1:
+        period = "day"
+    else:
+        _, period = message.text.split(maxsplit=1)
+    if period == "day":
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        con = sql.connect("meals.db")
+        c = con.cursor()
+        c.execute(
+            "SELECT meal, amount, calories FROM meals WHERE time LIKE ?", (f"{today}%",)
         )
+        meals = c.fetchall()
+        con.commit()
+        con.close()
+
+        if meals:
+            calories_total = [cal for _, _, cal in meals]
+            meal_list = "\n".join(
+                [
+                    f"- {meal} ({amount}g): *{calories:.2f} kcal*"
+                    for meal, amount, calories in meals
+                ]
+            )
+            bot.send_message(
+                message.chat.id,
+                f"{random.choice(FOOD_EMOJIS)} *Вот ваши сегодняшние блюда*:\n\n{meal_list}\n\n📝 В сумме: *{sum(calories_total):.2f} kcal* за день",
+                parse_mode="Markdown",
+            )
+        else:
+            bot.send_message(
+                message.chat.id, "❌ Вы пока что не добавляли никакой еды за сегодня!"
+            )
+    elif period in ("week", "month", "year"):
+        try:
+            if period == "week":
+                start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            elif period == "month":
+                start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            elif period == "year":
+                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+
+            con = sql.connect("meals.db")
+            c = con.cursor()
+            data = c.execute(
+                "SELECT calories, strftime('%Y-%m-%d', time) as date FROM meals WHERE time >= ?",
+                (start_date,),
+            )
+            calories_by_date = {}
+            for calories, date in data.fetchall():
+                calories_by_date.setdefault(date, []).append(calories)
+            con.commit()
+            con.close()
+
+            total_days = len(calories_by_date)
+            avg_calories = (
+                sum(sum(daily_calories) for daily_calories in calories_by_date.values())
+                / total_days
+            )
+
+            bot.send_message(
+                message.chat.id,
+                f"""{random.choice(FOOD_EMOJIS)} Средий показатель килокалорий за {f'''последний {"месяц" if period == "month" else "год"}''' if period != "week" else "последнюю неделю"}:\n\n*{avg_calories:.2f} kcal* в день.""",
+                parse_mode="Markdown",
+            )
+
+        except ZeroDivisionError:
+            bot.send_message(message.chat.id, "❌ Не найдено блюд за этот период.")
+    elif period == "all":
+        con = sql.connect("meals.db")
+        c = con.cursor()
+        c.execute("SELECT * FROM meals")
+        meals = c.fetchall()
+        con.commit()
+        con.close()
+
+        if meals:
+            df = pd.DataFrame(meals, columns=["Time", "Meal", "Grams", "Kcalories"])
+            file_path = "meals_data.csv"
+            df.to_csv(file_path, index=False)
+            with open(file_path, "rb") as f:
+                bot.send_document(message.chat.id, f)
+            os.remove(file_path)
+        else:
+            bot.send_message(message.chat.id, "❌ Никаких данных по еде не найдено.")
+    else:
         bot.send_message(
             message.chat.id,
-            f"{random.choice(FOOD_EMOJIS)} Вот Ваши блюда:\n{meal_list}",
+            "❌ Неверный период. Используй: day, week, month, year, или all",
         )
-    else:
-        bot.send_message(message.chat.id, "❌ Вы пока что не добавляли никакой еды!")
 
 
 bot.infinity_polling()
