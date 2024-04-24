@@ -22,7 +22,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 con = sql.connect("meals.db")
 c = con.cursor()
 c.execute("""CREATE TABLE IF NOT EXISTS meals
-             (time text, meal text, amount integer, calories integer)""")
+             (id integer, time text, meal text, amount integer, calories integer)""")
 con.commit()
 con.close()
 
@@ -64,8 +64,8 @@ def add_meal(message: telebot.types.Message):
         con = sql.connect("meals.db")
         c = con.cursor()
         c.execute(
-            "INSERT INTO meals VALUES (?, ?, ?, ?)",
-            (current_time, meal, amount, total_calories),
+            "INSERT INTO meals VALUES (?, ?, ?, ?, ?)",
+            (message.from_user.id, current_time, meal, amount, total_calories),
         )
 
         bot.send_message(
@@ -101,7 +101,8 @@ def view_meals(message: telebot.types.Message):
         con = sql.connect("meals.db")
         c = con.cursor()
         c.execute(
-            "SELECT meal, amount, calories FROM meals WHERE time LIKE ?", (f"{today}%",)
+            "SELECT meal, amount, calories FROM meals WHERE time LIKE ? AND id = ?",
+            (f"{today}%", f"{message.from_user.id}"),
         )
         meals = c.fetchall()
         con.commit()
@@ -136,8 +137,8 @@ def view_meals(message: telebot.types.Message):
             con = sql.connect("meals.db")
             c = con.cursor()
             data = c.execute(
-                "SELECT calories, strftime('%Y-%m-%d', time) as date FROM meals WHERE time >= ?",
-                (start_date,),
+                "SELECT calories, strftime('%Y-%m-%d', time) as date FROM meals WHERE time >= ? AND id = ?",
+                (start_date, f"{message.from_user.id}"),
             )
             calories_by_date = {}
             for calories, date in data.fetchall():
@@ -162,8 +163,10 @@ def view_meals(message: telebot.types.Message):
     elif period == "all":
         con = sql.connect("meals.db")
         c = con.cursor()
-        c.execute("SELECT * FROM meals")
-        meals = c.fetchall()
+        meals = c.execute(
+            "SELECT time, meal, amount, calories FROM meals WHERE id = ?",
+            (f"{message.from_user.id}",),
+        ).fetchall()
         con.commit()
         con.close()
 
