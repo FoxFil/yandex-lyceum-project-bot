@@ -1,0 +1,5 @@
+telebot
+pandas
+matplotlib
+python-dotenv
+requests
