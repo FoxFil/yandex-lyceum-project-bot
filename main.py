@@ -45,6 +45,7 @@ def help(message: telebot.types.Message):
         """Список команд:
 /add {блюдо} {граммы} - добавить блюдо.
 /view [day, week, month, year, all] - посмотреть список блюд за определенный период.
+/graph [day, week, month, year] - получить граф КБЖУ.
 /start - начать работу с ботом.
 /help - список команд.""",
     )
